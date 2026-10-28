@@ -190,7 +190,8 @@ function firebaseStore(){
       return () => ref.off("value", h);
     },
     add(q, text){ return db.ref("answers/q" + q).push(text); },
-    clear(q){ return db.ref("answers/q" + q).remove().catch(onErr); }
+    clear(q){ return db.ref("answers/q" + q).remove().catch(onErr); },
+    async getAll(){ const s = await db.ref("answers").once("value"); const v = s.val() || {}; const out = {}; for(const k in v) out[k] = Object.values(v[k] || {}); return out; }
   };
 }
 
@@ -207,7 +208,8 @@ function demoStore(){
     setActive(i){ const d=read(); d.active=i; write(d); },
     onAnswers(q, cb){ const f = d => cb((d.answers["q"+q]||[])); subs.add(f); f(read()); return () => subs.delete(f); },
     add(q, text){ const d=read(); (d.answers["q"+q] ||= []).push(text); write(d); return Promise.resolve(); },
-    clear(q){ const d=read(); d.answers["q"+q]=[]; write(d); }
+    clear(q){ const d=read(); d.answers["q"+q]=[]; write(d); },
+    async getAll(){ return read().answers; }
   };
 }
 
@@ -307,6 +309,53 @@ function startScreen(){
   clearBtn.className = "danger"; clearBtn.textContent = "Tøm svar";
   clearBtn.onclick = () => { if(confirm("Slette alle svar på spørsmål " + (active + 1) + "?")) store.clear(active); };
   controls.appendChild(clearBtn);
+
+  // Last ned alle svar som CSV (åpnes i Excel)
+  const csvBtn = document.createElement("button");
+  csvBtn.textContent = "Last ned svar";
+  csvBtn.onclick = async () => {
+    try{
+      const all = await store.getAll();
+      const esc = v => '"' + String(v).replace(/"/g, '""') + '"';
+      const rows = [["Nr", "Spørsmål", "Svar", "Antall"].map(esc).join(";")];
+      SPORSMAL.forEach((q, i) => {
+        const counts = new Map(), display = new Map();
+        for(const raw of (all["q" + i] || [])){
+          if(typeof raw !== "string") continue;
+          const clean = raw.replace(/\s+/g, " ").trim(), key = clean.toLowerCase();
+          if(!key) continue;
+          counts.set(key, (counts.get(key) || 0) + 1);
+          if(!display.has(key)) display.set(key, clean);
+        }
+        [...counts.entries()].sort((a, b) => b[1] - a[1])
+          .forEach(([k, n]) => rows.push([i + 1, esc(q.tekst), esc(display.get(k)), n].join(";")));
+      });
+      const blob = new Blob(["﻿" + rows.join("\r\n")], {type: "text/csv;charset=utf-8"});
+      saveBlob(blob, "ordsky-svar-" + new Date().toISOString().slice(0, 10) + ".csv");
+    }catch(e){ alert("Kunne ikke hente svarene: " + (e.message || e)); }
+  };
+  controls.appendChild(csvBtn);
+
+  // Last ned QR-koden som bilde (til presentasjonen)
+  const qrDlBtn = document.createElement("button");
+  qrDlBtn.textContent = "Last ned QR";
+  qrDlBtn.onclick = () => {
+    const big = qrcode(0, "M"); big.addData(joinUrl); big.make();
+    const cell = 20, margin = 2, n = big.getModuleCount(), size = (n + margin * 2) * cell;
+    const c = document.createElement("canvas"); c.width = c.height = size;
+    const x = c.getContext("2d"); x.fillStyle = "#fff"; x.fillRect(0, 0, size, size); x.fillStyle = "#000";
+    for(let r = 0; r < n; r++) for(let col = 0; col < n; col++)
+      if(big.isDark(r, col)) x.fillRect((col + margin) * cell, (r + margin) * cell, cell, cell);
+    c.toBlob(b => saveBlob(b, "ordsky-qr.png"), "image/png");
+  };
+  controls.appendChild(qrDlBtn);
+
+  function saveBlob(blob, name){
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
 
   store.onActive(i => {
     active = Math.min(i, SPORSMAL.length - 1);
