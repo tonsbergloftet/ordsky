@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Ordsky</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@600;700&family=Nunito:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --navy:#1f2a44; --navy-2:#283553; --cream:#f5f1ea; --orange:#e07a3f; --orange-soft:#f3d3bd;
+    --ink:#1f2a44; --muted:#8b93a7; --line:#3a4767; --ok:#8cc7a8; --warn:#f2a6a0;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--navy);color:var(--cream);font-family:Nunito,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  h1{font-family:Rubik,Nunito,system-ui,sans-serif}
+  button{font:inherit;cursor:pointer}
+  .num{color:var(--orange)}
+
+  /* ---------- Mobilvisning (deltakere) ---------- */
+  .phone{min-height:100%;display:flex;flex-direction:column;padding:32px 20px 40px;max-width:520px;margin:0 auto}
+  .phone .label{font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--orange);margin-bottom:10px}
+  .phone h1{font-size:clamp(24px,6.5vw,30px);line-height:1.2;margin:0 0 8px;font-weight:700}
+  .phone .sub{color:var(--muted);font-size:15px;margin:0 0 22px}
+  .phone form{display:flex;gap:8px}
+  .phone input{flex:1;min-width:0;font:inherit;font-size:18px;padding:14px 16px;border:2px solid var(--line);border-radius:14px;background:var(--navy-2);color:var(--cream);outline:none}
+  .phone input::placeholder{color:var(--muted)}
+  .phone input:focus{border-color:var(--orange)}
+  .phone .send{font-size:17px;font-weight:700;padding:0 18px;border:0;border-radius:14px;background:var(--orange);color:#fff}
+  .phone .send:disabled{opacity:.45;cursor:default}
+  .phone .hint{font-size:14px;color:var(--muted);margin:10px 2px 0;min-height:1.4em}
+  .phone .hint.ok{color:var(--ok);font-weight:700}
+  .phone .hint.err{color:var(--warn);font-weight:700}
+  .chips-title{font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:26px 0 10px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{border:1.5px solid var(--line);background:transparent;color:var(--cream);padding:9px 14px;border-radius:999px;font-size:15px;line-height:1.25;text-align:left;transition:background .15s,border-color .15s}
+  .chip:active{transform:scale(.97)}
+  .chip.sent{background:var(--orange-soft);border-color:var(--orange-soft);color:var(--navy);cursor:default}
+  .chip.sent::before{content:"✓ ";font-weight:700}
+
+  /* ---------- Storskjerm ---------- */
+  .screen{height:100%;display:grid;grid-template-rows:auto 1fr;padding:32px 40px 20px}
+  .screen header{display:flex;align-items:flex-start;justify-content:space-between;gap:24px}
+  .screen h1{font-size:clamp(28px,3.4vw,52px);line-height:1.15;margin:0;font-weight:700;max-width:75%}
+  .screen .count{font-size:18px;color:var(--muted);white-space:nowrap;padding-top:10px}
+  .stage{position:relative;min-height:0}
+  .screen.with-qr .stage{margin-right:230px}
+  .stage canvas{position:absolute;inset:0;width:100%;height:100%}
+  .empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:22px}
+  .join{position:fixed;right:32px;bottom:32px;background:var(--cream);color:var(--navy);border:2px dashed var(--orange);border-radius:20px;padding:16px;text-align:center}
+  .join .qr svg{width:170px;height:170px;display:block}
+  .join .url{font-size:14px;color:#5b6378;margin-top:8px;max-width:170px;word-break:break-all}
+  .join strong{display:block;font-size:16px;margin-bottom:10px}
+  .controls{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);display:flex;gap:6px;background:var(--navy-2);border:1px solid var(--line);border-radius:999px;padding:6px;opacity:.35;transition:opacity .2s}
+  .controls:hover,.controls:focus-within{opacity:1}
+  .controls button{border:0;background:transparent;padding:8px 14px;border-radius:999px;color:var(--cream);font-size:14px}
+  .controls button.active{background:var(--orange);color:#fff}
+  .controls button.danger{color:var(--warn)}
+  .banner{position:fixed;top:0;left:0;right:0;padding:10px 16px;background:#fff4d6;color:#6b4a00;font-size:14px;text-align:center;z-index:10}
+  body.has-banner .screen,body.has-banner .phone{padding-top:72px}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+
+<div id="banner" class="banner" hidden></div>
+
+<!-- Mobil -->
+<main id="phone" class="phone" hidden>
+  <div class="label" id="pLabel">Spørsmål</div>
+  <h1 id="pQuestion">…</h1>
+  <p class="sub">Svar anonymt. Send så mange du vil.</p>
+  <form id="pForm" autocomplete="off">
+    <input id="pInput" maxlength="60" placeholder="Skriv ditt eget svar" enterkeyhint="send">
+    <button class="send" id="pSend" type="submit">Send</button>
+  </form>
+  <div class="hint" id="pHint"></div>
+  <div class="chips-title">Eller trykk på et forslag</div>
+  <div class="chips" id="pChips"></div>
+</main>
+
+<!-- Storskjerm -->
+<main id="screen" class="screen" hidden>
+  <header>
+    <h1 id="sQuestion">…</h1>
+    <div class="count" id="sCount">0 svar</div>
+  </header>
+  <div class="stage" id="stage">
+    <canvas id="cloud"></canvas>
+    <div class="empty" id="empty">Venter på svar …</div>
+  </div>
+  <aside class="join" id="join">
+    <strong>Scan for å svare</strong>
+    <div class="qr" id="qr"></div>
+    <div class="url" id="joinUrl"></div>
+  </aside>
+  <nav class="controls" id="controls"></nav>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-app-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-database-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/wordcloud@1.2.3/src/wordcloud2.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script>
+/* =====================================================================
+   1) SPØRSMÅL OG FORSLAG
+   Hvert forslag står i anførselstegn, med komma mellom.
+   Hvert forslag kan være maks 60 tegn.
+   ===================================================================== */
+const SPORSMAL = [
+  {
+    tekst: "Hvordan bruker du KI i dag?",
+    forslag: [
+      "Ikke i det hele tatt",
+      "Som sparringspartner",
+      "I stedet for Google",
+      "Gjør research",
+      "Skriver e-poster og tekster",
+      "Oppsummerer lange dokumenter",
+      "Automatiserer prosesser",
+      "Lager møtereferater",
+      "Gjør byråkratspråk forståelig",
+      "Middagsforslag fra restene i kjøleskapet",
+      "For å få bekreftet at jeg har rett",
+      "Som tålmodig kollega klokka 23"
+    ]
+  },
+  {
+    tekst: "Hva står i veien for at du bruker KI (mer) i dag?",
+    forslag: [
+      "Redd for å gjøre noe feil",
+      "Vet ikke hvilke data jeg har lov til å dele",
+      "Vet ikke hvor jeg skal begynne",
+      "Har ikke tid til å lære det",
+      "Stoler ikke på svarene",
+      "Har ikke tilgang til verktøyene",
+      "Usikker på hva som er lov hos oss",
+      "Redd den hacker seg inn i nettbanken min",
+      "Redd den tar jobben min",
+      "Den er så høflig at jeg blir mistenksom",
+      "Glemmer at den finnes",
+      "Klimaavtrykket"
+    ]
+  }
+];
+
+/* =====================================================================
+   2) LIM INN FIREBASE-KONFIGURASJONEN DIN HER
+   Erstatt hele blokken mellom { og } med det du kopierer fra Firebase.
+   Så lenge det står LIM_INN_HER, kjører siden i demomodus
+   (fungerer bare på én datamaskin, fint for å teste utseendet).
+   ===================================================================== */
+const firebaseConfig = {
+  apiKey: "LIM_INN_HER",
+  authDomain: "",
+  databaseURL: "",
+  projectId: "",
+  storageBucket: "",
+  messagingSenderId: "",
+  appId: ""
+};
+
+/* ===================== Herfra trenger du ikke endre noe ===================== */
+
+const MAKS_TEGN = 60;
+const params = new URLSearchParams(location.search);
+const isScreen = params.get("vis") === "skjerm";
+const DEMO = !firebaseConfig.apiKey || firebaseConfig.apiKey.includes("LIM_INN");
+
+function showBanner(msg){ const b=document.getElementById("banner"); b.textContent=msg; b.hidden=false; document.body.classList.add("has-banner"); }
+
+/* ---------- Lagring: Firebase eller lokal demo ---------- */
+const store = DEMO ? demoStore() : firebaseStore();
+
+function firebaseStore(){
+  if(!firebaseConfig.databaseURL){
+    showBanner("Mangler databaseURL i firebaseConfig – se steg 4 i guiden.");
+  }
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+  const onErr = e => showBanner("Får ikke kontakt med databasen: " + (e && e.message ? e.message : e) + " – sjekk Regler (steg 3).");
+  return {
+    onActive(cb){ db.ref("active").on("value", s => cb(Number(s.val()) || 0), onErr); },
+    setActive(i){ return db.ref("active").set(i).catch(onErr); },
+    onAnswers(q, cb){
+      const ref = db.ref("answers/q" + q);
+      const h = ref.on("value", s => cb(Object.values(s.val() || {})), onErr);
+      return () => ref.off("value", h);
+    },
+    add(q, text){ return db.ref("answers/q" + q).push(text); },
+    clear(q){ return db.ref("answers/q" + q).remove().catch(onErr); }
+  };
+}
+
+function demoStore(){
+  showBanner("Demomodus: svar lagres bare i denne nettleseren. Lim inn Firebase-oppsettet for å bruke på workshop.");
+  const KEY = "ordsky-demo";
+  const read = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {active:0,answers:{}}; } catch(e){ return {active:0,answers:{}}; } };
+  const write = d => { try { localStorage.setItem(KEY, JSON.stringify(d)); } catch(e){} fire(); };
+  const subs = new Set();
+  const fire = () => subs.forEach(f => f(read()));
+  addEventListener("storage", e => { if(e.key === KEY) fire(); });
+  return {
+    onActive(cb){ const f = d => cb(d.active||0); subs.add(f); f(read()); },
+    setActive(i){ const d=read(); d.active=i; write(d); },
+    onAnswers(q, cb){ const f = d => cb((d.answers["q"+q]||[])); subs.add(f); f(read()); return () => subs.delete(f); },
+    add(q, text){ const d=read(); (d.answers["q"+q] ||= []).push(text); write(d); return Promise.resolve(); },
+    clear(q){ const d=read(); d.answers["q"+q]=[]; write(d); }
+  };
+}
+
+/* ---------- Mobilvisning ---------- */
+function startPhone(){
+  document.getElementById("phone").hidden = false;
+  const qEl = document.getElementById("pQuestion"), label = document.getElementById("pLabel");
+  const form = document.getElementById("pForm"), input = document.getElementById("pInput");
+  const send = document.getElementById("pSend"), hint = document.getElementById("pHint");
+  const chipsEl = document.getElementById("pChips");
+  let active = -1;
+
+  // Husker hvilke forslag denne mobilen allerede har sendt (per spørsmål)
+  const sentKey = q => "ordsky-forslag-" + q + "-" + SPORSMAL[q].tekst;
+  const getSent = q => { try { return new Set(JSON.parse(localStorage.getItem(sentKey(q))) || []); } catch(e){ return new Set(); } };
+  const markSent = (q, t) => { const s = getSent(q); s.add(t); try { localStorage.setItem(sentKey(q), JSON.stringify([...s])); } catch(e){} };
+
+  function say(msg, cls){ hint.className = "hint" + (cls ? " " + cls : ""); hint.textContent = msg; }
+
+  async function submit(text){
+    const q = active;
+    text = String(text).replace(/\s+/g, " ").trim().slice(0, MAKS_TEGN);
+    if(!text) return false;
+    try{ await store.add(q, text); say("Sendt! Send gjerne flere.", "ok"); return true; }
+    catch(err){ say("Kunne ikke sende. Prøv igjen.", "err"); return false; }
+  }
+
+  function render(){
+    const q = SPORSMAL[active];
+    label.textContent = "Spørsmål " + (active + 1) + " av " + SPORSMAL.length;
+    qEl.textContent = q.tekst;
+    say("");
+    const sent = getSent(active);
+    chipsEl.innerHTML = "";
+    for(const t of q.forslag){
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "chip" + (sent.has(t) ? " sent" : ""); b.textContent = t;
+      b.disabled = sent.has(t);
+      b.onclick = async () => {
+        b.disabled = true;
+        if(await submit(t)){ markSent(active, t); b.classList.add("sent"); }
+        else b.disabled = false;
+      };
+      chipsEl.appendChild(b);
+    }
+  }
+
+  store.onActive(i => {
+    i = Math.min(i, SPORSMAL.length - 1);
+    if(i !== active){ active = i; render(); }
+  });
+
+  form.addEventListener("submit", async e => {
+    e.preventDefault();
+    if(!input.value.trim()) return;
+    send.disabled = true;
+    if(await submit(input.value)) input.value = "";
+    send.disabled = false;
+    input.focus();
+  });
+}
+
+/* ---------- Storskjerm ---------- */
+function startScreen(){
+  const screenEl = document.getElementById("screen");
+  screenEl.hidden = false;
+  screenEl.classList.add("with-qr");
+  const qEl = document.getElementById("sQuestion"), countEl = document.getElementById("sCount");
+  const canvas = document.getElementById("cloud"), stage = document.getElementById("stage");
+  const empty = document.getElementById("empty"), controls = document.getElementById("controls");
+  const join = document.getElementById("join");
+
+  // QR-kode til mobilsiden (samme adresse uten ?vis=skjerm)
+  const joinUrl = location.origin + location.pathname;
+  const qr = qrcode(0, "M"); qr.addData(joinUrl); qr.make();
+  document.getElementById("qr").innerHTML = qr.createSvgTag({cellSize:4, margin:0, scalable:true});
+  document.getElementById("joinUrl").textContent = joinUrl.replace(/^https?:\/\//, "").replace(/\/(index\.html)?$/, "");
+
+  // Kontrollknapper (vises når du holder musa nederst på midten av skjermen)
+  let active = 0, unsub = null, answers = [], timer = null;
+  const qButtons = SPORSMAL.map((_, i) => {
+    const b = document.createElement("button");
+    b.textContent = "Spørsmål " + (i + 1);
+    b.onclick = () => store.setActive(i);
+    controls.appendChild(b); return b;
+  });
+  const qrBtn = document.createElement("button");
+  qrBtn.textContent = "Skjul QR";
+  qrBtn.onclick = () => {
+    join.hidden = !join.hidden;
+    screenEl.classList.toggle("with-qr", !join.hidden);
+    qrBtn.textContent = join.hidden ? "Vis QR" : "Skjul QR";
+    schedule();
+  };
+  controls.appendChild(qrBtn);
+  const clearBtn = document.createElement("button");
+  clearBtn.className = "danger"; clearBtn.textContent = "Tøm svar";
+  clearBtn.onclick = () => { if(confirm("Slette alle svar på spørsmål " + (active + 1) + "?")) store.clear(active); };
+  controls.appendChild(clearBtn);
+
+  store.onActive(i => {
+    active = Math.min(i, SPORSMAL.length - 1);
+    qButtons.forEach((b, j) => b.classList.toggle("active", j === active));
+    qEl.innerHTML = "";
+    const n = document.createElement("span"); n.className = "num"; n.textContent = (active + 1) + " ";
+    qEl.append(n, SPORSMAL[active].tekst);
+    if(unsub) unsub();
+    answers = []; schedule();
+    unsub = store.onAnswers(active, list => { answers = list; schedule(); });
+  });
+
+  // Tastatur: piltaster eller 1/2 bytter spørsmål, Q viser/skjuler QR
+  addEventListener("keydown", e => {
+    if(e.target.closest && e.target.closest("input,textarea")) return;
+    if(e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") store.setActive(Math.min(active + 1, SPORSMAL.length - 1));
+    else if(e.key === "ArrowLeft" || e.key === "PageUp") store.setActive(Math.max(active - 1, 0));
+    else if(/^[1-9]$/.test(e.key) && Number(e.key) <= SPORSMAL.length) store.setActive(Number(e.key) - 1);
+    else if(e.key.toLowerCase() === "q") qrBtn.click();
+    else return;
+    e.preventDefault();
+  });
+
+  function schedule(){ clearTimeout(timer); timer = setTimeout(draw, 350); }
+  addEventListener("resize", schedule);
+
+  const COLORS = ["#e07a3f","#f5f1ea","#8fb3e0","#e9c46a","#8cc7a8","#f2a6a0","#f3d3bd"];
+
+  function draw(){
+    // Tell like svar (ikke forskjell på store/små bokstaver)
+    const counts = new Map(), display = new Map();
+    for(const raw of answers){
+      if(typeof raw !== "string") continue;
+      const clean = raw.replace(/\s+/g, " ").trim();
+      const key = clean.toLowerCase();
+      if(!key) continue;
+      counts.set(key, (counts.get(key) || 0) + 1);
+      if(!display.has(key)) display.set(key, clean);
+    }
+    const total = [...counts.values()].reduce((a, b) => a + b, 0);
+    countEl.textContent = total + " svar";
+    empty.hidden = total > 0;
+
+    const dpr = window.devicePixelRatio || 1;
+    const w = stage.clientWidth, h = stage.clientHeight;
+    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+    if(!total) return;
+
+    const entries = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 100);
+    const max = entries[0][1];
+    const longest = Math.max(entries[0][0].length, 8);
+    const maxSize = Math.min(h * 0.2, (w * 0.9) / (longest * 0.55));
+    const minSize = Math.max(18, maxSize * 0.3);
+    const list = entries.map(([key, n]) => [display.get(key), (minSize + (maxSize - minSize) * Math.pow(n / max, 0.75)) * dpr]);
+
+    WordCloud(canvas, {
+      list,
+      gridSize: Math.round(7 * dpr),
+      weightFactor: 1,
+      fontFamily: "Rubik, Nunito, system-ui, sans-serif",
+      fontWeight: (word, weight) => weight > maxSize * dpr * 0.5 ? 700 : 600,
+      color: (word, weight) => weight >= maxSize * dpr * 0.85 ? COLORS[0]
+        : COLORS[1 + [...word].reduce((a, c) => a + c.charCodeAt(0), 0) % (COLORS.length - 1)],
+      rotateRatio: 0,
+      shuffle: false,
+      shrinkToFit: true,
+      drawOutOfBound: false,
+      backgroundColor: "rgba(0,0,0,0)"
+    });
+  }
+}
+
+if(isScreen) startScreen(); else startPhone();
+</script>
+</body>
+</html>
