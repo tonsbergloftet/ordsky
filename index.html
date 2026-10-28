@@ -190,7 +190,6 @@ function firebaseStore(){
       return () => ref.off("value", h);
     },
     add(q, text){ return db.ref("answers/q" + q).push(text); },
-    clear(q){ return db.ref("answers/q" + q).remove().catch(onErr); },
     async getAll(){ const s = await db.ref("answers").once("value"); const v = s.val() || {}; const out = {}; for(const k in v) out[k] = Object.values(v[k] || {}); return out; }
   };
 }
@@ -290,10 +289,13 @@ function startScreen(){
 
   // Kontrollknapper (vises når du holder musa nederst på midten av skjermen)
   let active = 0, unsub = null, answers = [], timer = null;
+  // Spørsmålet DU velger her. Endrer noen andre det, settes det straks tilbake.
+  let wanted = null;
+  const go = i => { wanted = i; store.setActive(i); };
   const qButtons = SPORSMAL.map((_, i) => {
     const b = document.createElement("button");
     b.textContent = "Spørsmål " + (i + 1);
-    b.onclick = () => store.setActive(i);
+    b.onclick = () => go(i);
     controls.appendChild(b); return b;
   });
   const qrBtn = document.createElement("button");
@@ -305,10 +307,6 @@ function startScreen(){
     schedule();
   };
   controls.appendChild(qrBtn);
-  const clearBtn = document.createElement("button");
-  clearBtn.className = "danger"; clearBtn.textContent = "Tøm svar";
-  clearBtn.onclick = () => { if(confirm("Slette alle svar på spørsmål " + (active + 1) + "?")) store.clear(active); };
-  controls.appendChild(clearBtn);
 
   // Last ned alle svar som CSV (åpnes i Excel)
   const csvBtn = document.createElement("button");
@@ -316,7 +314,7 @@ function startScreen(){
   csvBtn.onclick = async () => {
     try{
       const all = await store.getAll();
-      const esc = v => '"' + String(v).replace(/"/g, '""') + '"';
+      const esc = v => { v = String(v); if(/^[=+\-@\t\r]/.test(v)) v = "'" + v; return '"' + v.replace(/"/g, '""') + '"'; };
       const rows = [["Nr", "Spørsmål", "Svar", "Antall"].map(esc).join(";")];
       SPORSMAL.forEach((q, i) => {
         const counts = new Map(), display = new Map();
@@ -358,6 +356,7 @@ function startScreen(){
   }
 
   store.onActive(i => {
+    if(wanted !== null && i !== wanted){ store.setActive(wanted); return; }
     active = Math.min(i, SPORSMAL.length - 1);
     qButtons.forEach((b, j) => b.classList.toggle("active", j === active));
     qEl.innerHTML = "";
@@ -371,9 +370,9 @@ function startScreen(){
   // Tastatur: piltaster eller 1/2 bytter spørsmål, Q viser/skjuler QR
   addEventListener("keydown", e => {
     if(e.target.closest && e.target.closest("input,textarea")) return;
-    if(e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") store.setActive(Math.min(active + 1, SPORSMAL.length - 1));
-    else if(e.key === "ArrowLeft" || e.key === "PageUp") store.setActive(Math.max(active - 1, 0));
-    else if(/^[1-9]$/.test(e.key) && Number(e.key) <= SPORSMAL.length) store.setActive(Number(e.key) - 1);
+    if(e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") go(Math.min(active + 1, SPORSMAL.length - 1));
+    else if(e.key === "ArrowLeft" || e.key === "PageUp") go(Math.max(active - 1, 0));
+    else if(/^[1-9]$/.test(e.key) && Number(e.key) <= SPORSMAL.length) go(Number(e.key) - 1);
     else if(e.key.toLowerCase() === "q") qrBtn.click();
     else return;
     e.preventDefault();
@@ -429,7 +428,57 @@ function startScreen(){
   }
 }
 
-if(isScreen) startScreen(); else startPhone();
+/* ---------- Lasttest: ?vis=lasttest&antall=60 ----------
+   Åpner like mange separate databasetilkoblinger som deltakere,
+   og hver «deltaker» sender 2 svar på spørsmålet som er aktivt. */
+function startLoadTest(){
+  const box = document.createElement("pre");
+  box.style.cssText = "padding:32px;font-size:20px;line-height:1.6;white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace";
+  document.body.appendChild(box);
+  if(DEMO){ box.textContent = "Lasttest krever at Firebase-oppsettet er limt inn."; return; }
+  const n = Math.max(1, Math.min(Number(params.get("antall")) || 60, 150));
+  const t0 = performance.now();
+  const online = new Array(n).fill(false);
+  let sent = 0, failed = 0, totalMs = 0, maxMs = 0;
+  const pause = ms => new Promise(r => setTimeout(r, ms));
+
+  for(let i = 0; i < n; i++){
+    const app = firebase.initializeApp(firebaseConfig, "deltaker" + i);
+    const db = app.database();
+    db.ref(".info/connected").on("value", s => { online[i] = s.val() === true; });
+    (async () => {
+      try{
+        const q = Math.min(Number((await db.ref("active").once("value")).val()) || 0, SPORSMAL.length - 1);
+        for(let k = 0; k < 2; k++){
+          await pause(2000 + Math.random() * 15000);
+          const f = SPORSMAL[q].forslag;
+          const t = performance.now();
+          await db.ref("answers/q" + q).push(f[Math.floor(Math.pow(Math.random(), 2) * f.length)]);
+          const ms = performance.now() - t; totalMs += ms; maxMs = Math.max(maxMs, ms); sent++;
+        }
+      }catch(e){ failed++; console.error(e); }
+    })();
+  }
+
+  const tick = () => {
+    const up = online.filter(Boolean).length, secs = ((performance.now() - t0) / 1000).toFixed(0);
+    const done = sent + failed >= n * 2;
+    box.textContent =
+      "LASTTEST – " + n + " simulerte deltakere\n\n" +
+      "Tilkoblet nå:    " + up + " / " + n + "\n" +
+      "Svar sendt:      " + sent + " / " + (n * 2) + "\n" +
+      "Feilet:          " + failed + "\n" +
+      "Snitt svartid:   " + (sent ? Math.round(totalMs / sent) : "–") + " ms (maks " + Math.round(maxMs) + " ms)\n" +
+      "Tid:             " + secs + " s\n\n" +
+      (done ? (failed ? "⚠️ Noe feilet – se konsollen (F12)." : "✅ Ferdig. Se ordskyen på storskjermen.\nHusk å slette testsvarene i Firebase (Realtime Database → Data → answers).")
+            : "Kjører … (følg med på storskjermen i en annen fane)");
+    if(!done) setTimeout(tick, 500);
+  };
+  tick();
+}
+
+if(params.get("vis") === "lasttest") startLoadTest();
+else if(isScreen) startScreen(); else startPhone();
 </script>
 </body>
 </html>
