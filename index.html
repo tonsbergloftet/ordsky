@@ -168,6 +168,8 @@ const MAKS_TEGN = 60;
 const params = new URLSearchParams(location.search);
 const isScreen = params.get("vis") === "skjerm";
 const DEMO = !firebaseConfig.apiKey || firebaseConfig.apiKey.includes("LIM_INN");
+// Presentatørnøkkelen står KUN i din adresse (…?vis=skjerm&nokkel=…), aldri i koden.
+const NOKKEL = params.get("nokkel") || "";
 
 function showBanner(msg){ const b=document.getElementById("banner"); b.textContent=msg; b.hidden=false; document.body.classList.add("has-banner"); }
 
@@ -182,8 +184,12 @@ function firebaseStore(){
   const db = firebase.database();
   const onErr = e => showBanner("Får ikke kontakt med databasen: " + (e && e.message ? e.message : e) + " – sjekk Regler (steg 3).");
   return {
-    onActive(cb){ db.ref("active").on("value", s => cb(Number(s.val()) || 0), onErr); },
-    setActive(i){ return db.ref("active").set(i).catch(onErr); },
+    onActive(cb){ db.ref("active/q").on("value", s => cb(Number(s.val()) || 0), onErr); },
+    // Krever riktig nøkkel – databasereglene avviser alle andre
+    setActive(i){ return db.ref("active").set({ q: i, k: NOKKEL, t: firebase.database.ServerValue.TIMESTAMP }); },
+    // Første gang: lagrer nøkkelen din i databasen. Finnes den fra før, avvises dette (helt greit).
+    claim(){ return db.ref("admin/key").set(NOKKEL).catch(() => {}); },
+    currentActive(){ return db.ref("active/q").once("value").then(s => Number(s.val()) || 0); },
     onAnswers(q, cb){
       const ref = db.ref("answers/q" + q);
       const h = ref.on("value", s => cb(Object.values(s.val() || {})), onErr);
@@ -204,7 +210,9 @@ function demoStore(){
   addEventListener("storage", e => { if(e.key === KEY) fire(); });
   return {
     onActive(cb){ const f = d => cb(d.active||0); subs.add(f); f(read()); },
-    setActive(i){ const d=read(); d.active=i; write(d); },
+    setActive(i){ const d=read(); d.active=i; write(d); return Promise.resolve(); },
+    claim(){ return Promise.resolve(); },
+    currentActive(){ return Promise.resolve(read().active || 0); },
     onAnswers(q, cb){ const f = d => cb((d.answers["q"+q]||[])); subs.add(f); f(read()); return () => subs.delete(f); },
     add(q, text){ const d=read(); (d.answers["q"+q] ||= []).push(text); write(d); return Promise.resolve(); },
     clear(q){ const d=read(); d.answers["q"+q]=[]; write(d); },
@@ -289,15 +297,26 @@ function startScreen(){
 
   // Kontrollknapper (vises når du holder musa nederst på midten av skjermen)
   let active = 0, unsub = null, answers = [], timer = null;
-  // Spørsmålet DU velger her. Endrer noen andre det, settes det straks tilbake.
-  let wanted = null;
-  const go = i => { wanted = i; store.setActive(i); };
+  // Bare skjermen med riktig nøkkel får styre spørsmålene
+  let canControl = false;
+  const modeLabel = document.createElement("span");
+  modeLabel.style.cssText = "padding:8px 14px;font-size:14px;color:var(--muted)";
+  modeLabel.textContent = "Kun visning";
+  const go = i => {
+    if(!canControl) return;
+    store.setActive(i).catch(() => { canControl = false; setControlMode(); showBanner("Bytte ble avvist – feil eller manglende nøkkel i adressen."); });
+  };
+  function setControlMode(){
+    qButtons.forEach(b => b.hidden = !canControl);
+    modeLabel.hidden = canControl;
+  }
   const qButtons = SPORSMAL.map((_, i) => {
     const b = document.createElement("button");
     b.textContent = "Spørsmål " + (i + 1);
     b.onclick = () => go(i);
     controls.appendChild(b); return b;
   });
+  controls.appendChild(modeLabel);
   const qrBtn = document.createElement("button");
   qrBtn.textContent = "Skjul QR";
   qrBtn.onclick = () => {
@@ -355,8 +374,18 @@ function startScreen(){
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
+  setControlMode();
+  (async () => {
+    if(DEMO){ canControl = true; }
+    else if(NOKKEL){
+      await store.claim();
+      try{ await store.setActive(await store.currentActive()); canControl = true; }
+      catch(e){ showBanner("Feil nøkkel – skjermen vises uten kontroller."); }
+    }
+    setControlMode();
+  })();
+
   store.onActive(i => {
-    if(wanted !== null && i !== wanted){ store.setActive(wanted); return; }
     active = Math.min(i, SPORSMAL.length - 1);
     qButtons.forEach((b, j) => b.classList.toggle("active", j === active));
     qEl.innerHTML = "";
@@ -448,7 +477,7 @@ function startLoadTest(){
     db.ref(".info/connected").on("value", s => { online[i] = s.val() === true; });
     (async () => {
       try{
-        const q = Math.min(Number((await db.ref("active").once("value")).val()) || 0, SPORSMAL.length - 1);
+        const q = Math.min(Number((await db.ref("active/q").once("value")).val()) || 0, SPORSMAL.length - 1);
         for(let k = 0; k < 2; k++){
           await pause(2000 + Math.random() * 15000);
           const f = SPORSMAL[q].forslag;
